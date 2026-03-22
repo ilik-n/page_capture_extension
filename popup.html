@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 380px;
+      padding: 15px;
+      font-family: Arial, sans-serif;
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 16px;
+      color: #333;
+    }
+    .input-group {
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+      color: #555;
+    }
+    input[type="number"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    input[type="number"]:disabled {
+      background-color: #f5f5f5;
+      color: #999;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    #status {
+      margin-top: 10px;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      display: none;
+    }
+    .status-info {
+      background-color: #e3f2fd;
+      color: #1976d2;
+    }
+    .status-success {
+      background-color: #e8f5e9;
+      color: #388e3c;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .checkbox-label input[type="checkbox"] {
+      width: auto;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    select:disabled {
+  background-color: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+}
+  </style>
+</head>
+<body>
+  <h2>📸 Page Capture Extension</h2>
+  
+  <div class="input-group">
+    <label class="checkbox-label">
+      <input type="checkbox" id="twoRectangles">
+      <span>Capture two rectangles (for two-column layouts)</span>
+    </label>
+  </div>
+
+  <div class="input-group">
+    <label class="checkbox-label">
+      <input type="checkbox" id="rtlMode">
+      <span>Right-to-Left (RTL) navigation</span>
+    </label>
+  </div>
+  
+  <div class="input-group">
+    <label class="checkbox-label">
+      <input type="checkbox" id="autoMode">
+      <span>Auto-capture mode (stop on duplicates)</span>
+    </label>
+  </div>
+  
+  <div class="input-group" id="pageCountGroup">
+    <label for="pageCount">Number of pages to capture:</label>
+    <input type="number" id="pageCount" min="1" value="10" placeholder="Enter number of pages">
+    <small style="color: #666; font-size: 11px; margin-top: 5px; display: block;">
+      Leave empty or check auto-mode for unlimited capture
+    </small>
+  </div>
+
+  <div class="input-group">
+  <label class="checkbox-label">
+    <input type="checkbox" id="customDelayMode">
+    <span>Custom capture speed</span>
+  </label>
+</div>
+
+<div class="input-group" id="delayGroup">
+  <label for="captureDelay">Capture speed:</label>
+  <select id="captureDelay" disabled>
+    <option value="300">Fast (0.3s)</option>
+    <option value="800" selected>Normal (0.8s)</option>
+    <option value="1500">Slow (1.5s)</option>
+    <option value="3000">Very Slow (3s)</option>
+    <option value="5000">Ultra Slow (5s)</option>
+  </select>
+  <small style="color: #666; font-size: 11px; margin-top: 5px; display: block;">
+    Time to wait after each page navigation
+  </small>
+</div>
+
+  <div class="input-group">
+    <label class="checkbox-label">
+      <input type="checkbox" id="debugMode">
+      <span>Enable debug logging</span>
+    </label>
+  </div>
+
+  <button id="startButton">Start Selection</button>
+  <button id="cancelButton" style="background-color: #f44336; display: none;">Cancel Capture</button>
+  
+  <div id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
