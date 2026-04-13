@@ -35,6 +35,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === 'setDebugMode') {
     debugMode = message.enabled;
     debugLog('Debug mode:', debugMode ? 'enabled' : 'disabled');
+  } else if (message.action === 'captureForMagnifier') {
+    chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+      sendResponse({ dataUrl });
+    });
+    return true; // Keep message channel open for async response
   }
 });
 

@@ -22,6 +22,8 @@ if (window.captureExtensionLoaded) {
   let isSelectingSecondRect = false;
   let pendingCaptures = new Set(); // Track which captures are in progress
   let debugMode = false; // Enable/disable debug logging
+  let magnifierThrottleTimer = null;
+  let magnifierScreenshot = null; // Cache last screenshot for magnifier
 
   // Helper function for debug logging
   function debugLog(...args) {
@@ -235,7 +237,7 @@ if (window.captureExtensionLoaded) {
     // Create instruction text
     const instructionText = document.createElement('div');
     instructionText.id = 'captureInstruction';
-    instructionText.textContent = 'Click and drag to select capture area';
+    instructionText.textContent = 'Click and drag to select capture area — Esc to cancel';
     instructionText.style.cssText = `
       position: fixed;
       top: 5px;
@@ -254,6 +256,35 @@ if (window.captureExtensionLoaded) {
     document.body.appendChild(overlay);
     document.body.appendChild(selectionBox);
     document.body.appendChild(instructionText);
+
+    // Esc key cancels drawing at any point
+    function onEscKey(e) {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', onEscKey);
+        cleanupSelection();
+
+        // Toast message
+        const toast = document.createElement('div');
+        toast.textContent = '✕ Selection cancelled';
+        toast.style.cssText = `
+          position: fixed;
+          top: 5px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #ff9800;
+          color: white;
+          padding: 8px 20px;
+          border-radius: 5px;
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          z-index: 1000010;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        `;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+      }
+    }
+    document.addEventListener('keydown', onEscKey);
 
     // Mouse event handlers
     overlay.addEventListener('mousedown', startSelection);
@@ -481,47 +512,93 @@ if (window.captureExtensionLoaded) {
   
   function showMagnifier(magnifier, canvas, x, y) {
     magnifier.style.display = 'block';
-    magnifier.style.left = (x + 20) + 'px';
-    magnifier.style.top = (y + 20) + 'px';
-    
-    // Simple visualization showing coordinates
+
+    // Position magnifier with smart edge-flipping
+    let magX = x + 20;
+    let magY = y + 20;
+    if (magX + 160 > window.innerWidth) magX = x - 170;
+    if (magY + 160 > window.innerHeight) magY = y - 170;
+    magnifier.style.left = magX + 'px';
+    magnifier.style.top = magY + 'px';
+
+    // Draw cached screenshot immediately (feels responsive)
+    drawMagnifierContent(canvas, x, y, magnifierScreenshot);
+
+    // Throttle: only request a new screenshot every 100ms
+    if (magnifierThrottleTimer) return;
+    magnifierThrottleTimer = setTimeout(() => {
+      magnifierThrottleTimer = null;
+
+      chrome.runtime.sendMessage({ action: 'captureForMagnifier' }, (response) => {
+        if (response && response.dataUrl) {
+          magnifierScreenshot = response.dataUrl;
+          drawMagnifierContent(canvas, x, y, magnifierScreenshot);
+        }
+      });
+    }, 100);
+  }
+
+  function drawMagnifierContent(canvas, x, y, screenshotDataUrl) {
     const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Background
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Grid
-    ctx.strokeStyle = '#e0e0e0';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 150; i += 15) {
+    const w = canvas.width;  // 150
+    const h = canvas.height; // 150
+    const zoom = 3; // 3x magnification
+    const dpr = window.devicePixelRatio || 1;
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (screenshotDataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        // Region of screen to show: (150/zoom) x (150/zoom) px centered on cursor
+        const regionW = w / zoom;
+        const regionH = h / zoom;
+        const srcX = (x * dpr) - (regionW * dpr / 2);
+        const srcY = (y * dpr) - (regionH * dpr / 2);
+
+        ctx.drawImage(
+          img,
+          srcX, srcY,       // source top-left in screenshot pixels
+          regionW * dpr,    // source width
+          regionH * dpr,    // source height
+          0, 0,             // dest top-left
+          w, h              // dest size (zoomed)
+        );
+
+        // Crosshair on top of image
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.85)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
+        ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
+        ctx.stroke();
+
+        // Coordinates strip at bottom
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.fillRect(0, h - 22, w, 22);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.round(x)}, ${Math.round(y)}`, w / 2, h - 7);
+      };
+      img.src = screenshotDataUrl;
+    } else {
+      // Fallback: grey placeholder while first screenshot loads
+      ctx.fillStyle = '#cccccc';
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, 150);
+      ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
+      ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
       ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i);
-      ctx.lineTo(150, i);
-      ctx.stroke();
+
+      ctx.fillStyle = '#333333';
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${Math.round(x)}, ${Math.round(y)}`, w / 2, h / 2 + 5);
     }
-    
-    // Crosshair
-    ctx.strokeStyle = '#ff0000';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(canvas.width/2, 0);
-    ctx.lineTo(canvas.width/2, canvas.height);
-    ctx.moveTo(0, canvas.height/2);
-    ctx.lineTo(canvas.width, canvas.height/2);
-    ctx.stroke();
-    
-    // Coordinates
-    ctx.fillStyle = '#333';
-    ctx.font = 'bold 14px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(`X: ${Math.round(x)}`, canvas.width/2, 30);
-    ctx.fillText(`Y: ${Math.round(y)}`, canvas.width/2, 50);
   }
   
   function startResize(box, position, e, magnifier, magnifierCanvas) {
@@ -627,42 +704,55 @@ if (window.captureExtensionLoaded) {
   }
 
   function showConfirmation() {
-    const confirmDiv = document.createElement('div');
-    confirmDiv.style.cssText = `
+    const bar = document.createElement('div');
+    bar.id = 'captureConfirmBar';
+    bar.style.cssText = `
       position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: white;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      z-index: 1000001;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background: rgba(30, 30, 30, 0.92);
+      color: white;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 1000003;
       font-family: Arial, sans-serif;
-      text-align: center;
+      font-size: 14px;
+      box-sizing: border-box;
+      box-shadow: 0 -3px 12px rgba(0,0,0,0.4);
     `;
 
-    let message;
+    let hint;
     if (twoRectangles) {
-      message = autoCaptureMode
-        ? 'Two capture areas selected. Ready to capture pages? (Will auto-stop on duplicates)'
-        : `Two capture areas selected. Ready to capture ${pageCount} pages?`;
+      hint = autoCaptureMode
+        ? '✓ Two areas selected &nbsp;·&nbsp; Adjust the rectangles above, then start when ready &nbsp;·&nbsp; Auto-stop on duplicates'
+        : `✓ Two areas selected &nbsp;·&nbsp; Adjust the rectangles above, then start when ready &nbsp;·&nbsp; ${pageCount} pages`;
     } else {
-      message = autoCaptureMode
-        ? 'Capture area selected. Ready to capture pages? (Will auto-stop on duplicates)'
-        : `Capture area selected. Ready to capture ${pageCount} pages?`;
+      hint = autoCaptureMode
+        ? '✓ Capture area selected &nbsp;·&nbsp; Adjust the rectangle above, then start when ready &nbsp;·&nbsp; Auto-stop on duplicates'
+        : `✓ Capture area selected &nbsp;·&nbsp; Adjust the rectangle above, then start when ready &nbsp;·&nbsp; ${pageCount} pages`;
     }
 
-    confirmDiv.innerHTML = `
-      <p style="margin: 0 0 15px 0; font-size: 14px;">${message}</p>
-      <button id="confirmCapture" style="padding: 10px 20px; margin-right: 10px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">Start Capture</button>
-      <button id="cancelCapture" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+    bar.innerHTML = `
+      <span style="opacity: 0.85;">${hint}</span>
+      <span style="display: flex; align-items: center; gap: 14px; flex-shrink: 0; margin-left: 24px;">
+        <label style="display: flex; align-items: center; gap: 7px; opacity: 0.85; white-space: nowrap;">
+          &#x21A9; Go back
+          <input id="rewindPages" type="number" min="0" value="0" style="width: 54px; padding: 5px 7px; border-radius: 4px; border: none; font-size: 14px; text-align: center; color: #111;">
+          pages first
+        </label>
+        <button id="confirmCapture" style="padding: 8px 22px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">&#9654; Start Capture</button>
+        <button id="cancelCapture" style="padding: 8px 18px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">&#x2715; Cancel</button>
+      </span>
     `;
 
-    document.body.appendChild(confirmDiv);
+    document.body.appendChild(bar);
 
     document.getElementById('confirmCapture').addEventListener('click', () => {
-      confirmDiv.remove();
+      const rewindCount = Math.max(0, parseInt(document.getElementById('rewindPages').value) || 0);
+      bar.remove();
 
       // Hide both selection rectangles before starting capture
       if (selectionBox && selectionBox.parentNode) {
@@ -672,13 +762,46 @@ if (window.captureExtensionLoaded) {
         selectionBox2.style.display = 'none';
       }
 
-      startCapture();
+      if (rewindCount > 0) {
+        rewindThenCapture(rewindCount);
+      } else {
+        startCapture();
+      }
     });
 
     document.getElementById('cancelCapture').addEventListener('click', () => {
-      confirmDiv.remove();
+      bar.remove();
       cleanupSelection();
     });
+
+    // Esc also cancels from the confirmation bar
+    function onEscAtConfirm(e) {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', onEscAtConfirm);
+        bar.remove();
+        cleanupSelection();
+
+        const toast = document.createElement('div');
+        toast.textContent = '✕ Selection cancelled';
+        toast.style.cssText = `
+          position: fixed;
+          top: 5px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #ff9800;
+          color: white;
+          padding: 8px 20px;
+          border-radius: 5px;
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          z-index: 1000010;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        `;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+      }
+    }
+    document.addEventListener('keydown', onEscAtConfirm);
   }
 
   function cleanupSelection() {
@@ -691,6 +814,8 @@ if (window.captureExtensionLoaded) {
     if (selectionBox2 && selectionBox2.parentNode) selectionBox2.remove();
     const instruction = document.getElementById('captureInstruction');
     if (instruction && instruction.parentNode) instruction.remove();
+    const confirmBar = document.getElementById('captureConfirmBar');
+    if (confirmBar && confirmBar.parentNode) confirmBar.remove();
 
     // Remove event listeners
     document.removeEventListener('mousemove', updateSelection);
@@ -698,6 +823,57 @@ if (window.captureExtensionLoaded) {
 
     captureArea = null;
     isSelecting = false;
+  }
+
+  function rewindThenCapture(rewindCount) {
+    // Show a rewind progress indicator
+    const rewindDiv = document.createElement('div');
+    rewindDiv.id = 'rewindProgress';
+    rewindDiv.style.cssText = `
+      position: fixed;
+      top: 5px;
+      right: 20px;
+      background: #FF9800;
+      color: white;
+      padding: 8px 15px;
+      border-radius: 5px;
+      font-size: 14px;
+      font-family: Arial, sans-serif;
+      z-index: 1000002;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    `;
+    document.body.appendChild(rewindDiv);
+
+    let remaining = rewindCount;
+
+    function rewindStep() {
+      if (remaining <= 0) {
+        rewindDiv.remove();
+        startCapture();
+        return;
+      }
+
+      rewindDiv.textContent = `↩ Rewinding... ${remaining} page${remaining !== 1 ? 's' : ''} to go`;
+
+      // Press the OPPOSITE direction to go back
+      const key = rtlMode ? 'ArrowRight' : 'ArrowLeft';
+      const keyCode = rtlMode ? 39 : 37;
+
+      const eventDown = new KeyboardEvent('keydown', {
+        key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true
+      });
+      document.dispatchEvent(eventDown);
+
+      const eventUp = new KeyboardEvent('keyup', {
+        key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true
+      });
+      document.dispatchEvent(eventUp);
+
+      remaining--;
+      setTimeout(rewindStep, 300); // 300ms between each rewind key — fast but reliable
+    }
+
+    rewindStep();
   }
 
   async function startCapture() {
