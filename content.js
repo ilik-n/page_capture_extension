@@ -225,11 +225,11 @@ if (window.captureExtensionLoaded) {
     selectionBox = document.createElement('div');
     selectionBox.style.cssText = `
       position: fixed;
-      border: 3px solid #ff0000;
-      background: rgba(255, 0, 0, 0.2);
+      border: 1px solid #ff0000;
+      background: rgba(255, 0, 0, 0.1);
       z-index: 1000000;
       display: none;
-      box-shadow: 0 0 10px rgba(255, 0, 0, 0.8);
+      pointer-events: none;
     `;
 
     // Create instruction text
@@ -330,7 +330,11 @@ if (window.captureExtensionLoaded) {
 
       if (twoRectangles) {
         selectionBox.style.background = 'transparent';
-        selectionBox.style.border = '2px solid #00ff00'; // Green for first
+        selectionBox.style.border = '1px solid #00ff00'; // Green for first
+        selectionBox.style.pointerEvents = 'auto'; // Enable interaction for resizing
+        
+        // Add resize handles to first box
+        addResizeHandles(selectionBox);
 
         // Update instruction
         const instruction = document.getElementById('captureInstruction');
@@ -343,11 +347,11 @@ if (window.captureExtensionLoaded) {
         selectionBox2 = document.createElement('div');
         selectionBox2.style.cssText = `
     position: fixed;
-    border: 3px solid #ff0000;
-    background: rgba(255, 0, 0, 0.2);
+    border: 1px solid #ff0000;
+    background: rgba(255, 0, 0, 0.1);
     z-index: 1000000;
     display: none;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.8);
+    pointer-events: none;
   `;
         document.body.appendChild(selectionBox2);
 
@@ -377,8 +381,249 @@ if (window.captureExtensionLoaded) {
     const instruction = document.getElementById('captureInstruction');
     if (instruction) instruction.remove();
 
+    // Add resize handles to the rectangles
+    addResizeHandles(isSelectingSecondRect ? selectionBox2 : selectionBox);
+
     // Show confirmation
     showConfirmation();
+  }
+
+  function addResizeHandles(box) {
+    // Enable pointer events for the box
+    box.style.pointerEvents = 'auto';
+    box.style.cursor = 'move';
+    
+    // Create magnifying glass element
+    const magnifier = document.createElement('div');
+    magnifier.id = 'resize-magnifier';
+    magnifier.style.cssText = `
+      position: fixed;
+      width: 150px;
+      height: 150px;
+      border: 2px solid #000;
+      border-radius: 50%;
+      background: white;
+      z-index: 1000002;
+      display: none;
+      pointer-events: none;
+      overflow: hidden;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    `;
+    
+    const magnifierCanvas = document.createElement('canvas');
+    magnifierCanvas.width = 150;
+    magnifierCanvas.height = 150;
+    magnifier.appendChild(magnifierCanvas);
+    document.body.appendChild(magnifier);
+    
+    // Create 8 resize handles (corners and edges)
+    const handles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+    const handleSize = 8;
+    
+    handles.forEach(position => {
+      const handle = document.createElement('div');
+      handle.className = `resize-handle resize-${position}`;
+      handle.style.cssText = `
+        position: absolute;
+        width: ${handleSize}px;
+        height: ${handleSize}px;
+        background: #ffffff;
+        border: 1px solid #000000;
+        z-index: 1000001;
+      `;
+      
+      // Position handles
+      if (position.includes('n')) handle.style.top = `-${handleSize/2}px`;
+      if (position.includes('s')) handle.style.bottom = `-${handleSize/2}px`;
+      if (position.includes('w')) handle.style.left = `-${handleSize/2}px`;
+      if (position.includes('e')) handle.style.right = `-${handleSize/2}px`;
+      if (position === 'n' || position === 's') handle.style.left = `calc(50% - ${handleSize/2}px)`;
+      if (position === 'w' || position === 'e') handle.style.top = `calc(50% - ${handleSize/2}px)`;
+      
+      // Set cursor
+      const cursors = {
+        'nw': 'nw-resize', 'n': 'n-resize', 'ne': 'ne-resize',
+        'e': 'e-resize', 'se': 'se-resize', 's': 's-resize',
+        'sw': 'sw-resize', 'w': 'w-resize'
+      };
+      handle.style.cursor = cursors[position];
+      
+      // Show magnifier on hover
+      handle.addEventListener('mouseenter', (e) => {
+        showMagnifier(magnifier, magnifierCanvas, e.clientX, e.clientY);
+      });
+      
+      handle.addEventListener('mouseleave', () => {
+        if (!handle.dataset.dragging) {
+          magnifier.style.display = 'none';
+        }
+      });
+      
+      // Add resize functionality
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handle.dataset.dragging = 'true';
+        startResize(box, position, e, magnifier, magnifierCanvas);
+      });
+      
+      box.appendChild(handle);
+    });
+    
+    // Add drag functionality for the whole box
+    box.addEventListener('mousedown', (e) => {
+      if (e.target === box) {
+        e.preventDefault();
+        startDrag(box, e);
+      }
+    });
+  }
+  
+  function showMagnifier(magnifier, canvas, x, y) {
+    magnifier.style.display = 'block';
+    magnifier.style.left = (x + 20) + 'px';
+    magnifier.style.top = (y + 20) + 'px';
+    
+    // Simple visualization showing coordinates
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Grid
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 150; i += 15) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 150);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(150, i);
+      ctx.stroke();
+    }
+    
+    // Crosshair
+    ctx.strokeStyle = '#ff0000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width/2, 0);
+    ctx.lineTo(canvas.width/2, canvas.height);
+    ctx.moveTo(0, canvas.height/2);
+    ctx.lineTo(canvas.width, canvas.height/2);
+    ctx.stroke();
+    
+    // Coordinates
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`X: ${Math.round(x)}`, canvas.width/2, 30);
+    ctx.fillText(`Y: ${Math.round(y)}`, canvas.width/2, 50);
+  }
+  
+  function startResize(box, position, e, magnifier, magnifierCanvas) {
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startRect = box.getBoundingClientRect();
+    
+    function onMouseMove(e) {
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      
+      let newLeft = startRect.left;
+      let newTop = startRect.top;
+      let newWidth = startRect.width;
+      let newHeight = startRect.height;
+      
+      if (position.includes('w')) {
+        newLeft += deltaX;
+        newWidth -= deltaX;
+      }
+      if (position.includes('e')) {
+        newWidth += deltaX;
+      }
+      if (position.includes('n')) {
+        newTop += deltaY;
+        newHeight -= deltaY;
+      }
+      if (position.includes('s')) {
+        newHeight += deltaY;
+      }
+      
+      // Apply constraints
+      if (newWidth > 10) {
+        box.style.left = newLeft + 'px';
+        box.style.width = newWidth + 'px';
+      }
+      if (newHeight > 10) {
+        box.style.top = newTop + 'px';
+        box.style.height = newHeight + 'px';
+      }
+      
+      // Update magnifier position and content
+      showMagnifier(magnifier, magnifierCanvas, e.clientX, e.clientY);
+      
+      // Update capture area
+      updateCaptureArea(box);
+    }
+    
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      magnifier.style.display = 'none';
+      
+      // Clear dragging flag
+      const handles = box.querySelectorAll('.resize-handle');
+      handles.forEach(h => delete h.dataset.dragging);
+    }
+    
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+  
+  function startDrag(box, e) {
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startRect = box.getBoundingClientRect();
+    
+    function onMouseMove(e) {
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      
+      box.style.left = (startRect.left + deltaX) + 'px';
+      box.style.top = (startRect.top + deltaY) + 'px';
+      
+      // Update capture area
+      updateCaptureArea(box);
+    }
+    
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+    
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+  
+  function updateCaptureArea(box) {
+    const rect = box.getBoundingClientRect();
+    const newArea = {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+    
+    // Update the appropriate capture area
+    if (box === selectionBox) {
+      captureArea = newArea;
+    } else if (box === selectionBox2) {
+      captureArea2 = newArea;
+    }
   }
 
   function showConfirmation() {

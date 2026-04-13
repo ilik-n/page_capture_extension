@@ -62,7 +62,7 @@ chrome.downloads.onChanged.addListener((downloadDelta) => {
   }
 });
 
-async function captureScreenshot(area, pageNumber, totalPages, tabId) {
+async function captureScreenshot(area, pageNumber, totalPages, tabId, retryCount = 0) {
   try {
     // Capture the visible tab
     const dataUrl = await chrome.tabs.captureVisibleTab(null, {
@@ -81,10 +81,18 @@ async function captureScreenshot(area, pageNumber, totalPages, tabId) {
 
   } catch (error) {
     console.error('Capture error:', error);
+    
+    // Retry if tab is busy (user dragging, etc.)
+    if (error.message.includes('cannot be edited') && retryCount < 3) {
+      console.log(`Retrying capture (attempt ${retryCount + 1}/3)...`);
+      setTimeout(() => {
+        captureScreenshot(area, pageNumber, totalPages, tabId, retryCount + 1);
+      }, 200); // Wait 200ms and retry
+    }
   }
 }
 
-async function captureTwoAreas(area1, area2, pageNumber1, pageNumber2, tabId) {
+async function captureTwoAreas(area1, area2, pageNumber1, pageNumber2, tabId, retryCount = 0) {
   try {
     // Capture the visible tab ONCE
     const dataUrl = await chrome.tabs.captureVisibleTab(null, {
@@ -115,6 +123,14 @@ async function captureTwoAreas(area1, area2, pageNumber1, pageNumber2, tabId) {
 
   } catch (error) {
     console.error('Capture error:', error);
+    
+    // Retry if tab is busy
+    if (error.message.includes('cannot be edited') && retryCount < 3) {
+      console.log(`Retrying two-area capture (attempt ${retryCount + 1}/3)...`);
+      setTimeout(() => {
+        captureTwoAreas(area1, area2, pageNumber1, pageNumber2, tabId, retryCount + 1);
+      }, 200);
+    }
   }
 }
 
