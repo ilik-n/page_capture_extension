@@ -24,6 +24,9 @@ if (window.captureExtensionLoaded) {
   let debugMode = false; // Enable/disable debug logging
   let magnifierThrottleTimer = null;
   let magnifierScreenshot = null; // Cache last screenshot for magnifier
+  let mouseClickMode = false;
+  let clickCoordinate = null;     // {x, y} viewport coords for forward mouse-click navigation
+  let clickCoordinateBack = null; // {x, y} viewport coords for backward mouse-click navigation (rewind)
 
   // Helper function for debug logging
   function debugLog(...args) {
@@ -42,13 +45,28 @@ if (window.captureExtensionLoaded) {
       debugMode = message.debugMode || false;
       captureCancelled = false;
       captureDelay = message.captureDelay || 800;
-  
+      mouseClickMode = message.mouseClickMode || false;
+      clickCoordinate = null;
+      clickCoordinateBack = null;
+
       console.log('🔧 Capture delay set to:', captureDelay, 'ms');
-      
-      // Send debugMode to background script
+
       chrome.runtime.sendMessage({ action: 'setDebugMode', enabled: debugMode });
-      
       initializeSelection();
+    } else if (message.action === 'startClickPick') {
+      pageCount = message.pageCount;
+      rtlMode = false;
+      autoCaptureMode = message.autoCaptureMode || false;
+      twoRectangles = message.twoRectangles || false;
+      debugMode = message.debugMode || false;
+      captureCancelled = false;
+      captureDelay = message.captureDelay || 800;
+      mouseClickMode = true;
+      clickCoordinate = null;
+      clickCoordinateBack = null;
+
+      chrome.runtime.sendMessage({ action: 'setDebugMode', enabled: debugMode });
+      enterClickPickMode();
     } else if (message.action === 'cropImage') {
       cropImage(message.dataUrl, message.area, message.pageNumber);
     } else if (message.action === 'cancelCapture') {
@@ -204,6 +222,183 @@ if (window.captureExtensionLoaded) {
     };
 
     img.src = dataUrl;
+  }
+
+  function enterClickPickMode() {
+    cleanupSelection();
+
+    const pickOverlay = document.createElement('div');
+    pickOverlay.id = 'clickPickOverlay';
+    pickOverlay.style.cssText = `
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 999999;
+      cursor: crosshair;
+    `;
+
+    const pickInstruction = document.createElement('div');
+    pickInstruction.id = 'clickPickInstruction';
+    pickInstruction.textContent = 'Click anywhere to set the navigation target point — Esc to cancel';
+    pickInstruction.style.cssText = `
+      position: fixed;
+      top: 5px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #FF9800;
+      color: white;
+      padding: 8px 15px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 1000001;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      white-space: nowrap;
+    `;
+
+    document.body.appendChild(pickOverlay);
+    document.body.appendChild(pickInstruction);
+
+    function onPickClick(e) {
+      e.preventDefault();
+      clickCoordinate = { x: e.clientX, y: e.clientY };
+      debugLog('Forward click coordinate set:', clickCoordinate);
+
+      pickOverlay.remove();
+      pickInstruction.remove();
+      document.removeEventListener('keydown', onPickEsc);
+
+      enterBackClickPickMode();
+    }
+
+    function onPickEsc(e) {
+      if (e.key === 'Escape') {
+        pickOverlay.remove();
+        pickInstruction.remove();
+        pickOverlay.removeEventListener('click', onPickClick);
+        document.removeEventListener('keydown', onPickEsc);
+
+        const toast = document.createElement('div');
+        toast.textContent = '✕ Selection cancelled';
+        toast.style.cssText = `
+          position: fixed;
+          top: 5px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #ff9800;
+          color: white;
+          padding: 8px 20px;
+          border-radius: 5px;
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          z-index: 1000010;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        `;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+      }
+    }
+
+    pickOverlay.addEventListener('click', onPickClick);
+    document.addEventListener('keydown', onPickEsc);
+  }
+
+  function enterBackClickPickMode() {
+    const backOverlay = document.createElement('div');
+    backOverlay.style.cssText = `
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 999999;
+      cursor: crosshair;
+    `;
+
+    const backInstruction = document.createElement('div');
+    backInstruction.style.cssText = `
+      position: fixed;
+      top: 5px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #9C27B0;
+      color: white;
+      padding: 8px 15px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 1000001;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      white-space: nowrap;
+    `;
+    backInstruction.textContent = 'Click the BACK button for rewind — Esc to skip';
+
+    document.body.appendChild(backOverlay);
+    document.body.appendChild(backInstruction);
+
+    function finish(coord) {
+      backOverlay.remove();
+      backInstruction.remove();
+      backOverlay.removeEventListener('click', onBackClick);
+      document.removeEventListener('keydown', onBackEsc);
+
+      clickCoordinateBack = coord;
+
+      const toast = document.createElement('div');
+      if (coord) {
+        toast.textContent = `✓ Forward (${Math.round(clickCoordinate.x)}, ${Math.round(clickCoordinate.y)}) · Back (${Math.round(coord.x)}, ${Math.round(coord.y)}) — now draw your capture area`;
+        toast.style.cssText = `
+          position: fixed;
+          top: 5px; left: 50%;
+          transform: translateX(-50%);
+          background: #4CAF50;
+          color: white;
+          padding: 8px 15px;
+          border-radius: 5px;
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          z-index: 1000010;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+          white-space: nowrap;
+        `;
+      } else {
+        toast.textContent = `✓ Forward (${Math.round(clickCoordinate.x)}, ${Math.round(clickCoordinate.y)}) — no back target, rewind will use arrow keys`;
+        toast.style.cssText = `
+          position: fixed;
+          top: 5px; left: 50%;
+          transform: translateX(-50%);
+          background: #FF9800;
+          color: white;
+          padding: 8px 15px;
+          border-radius: 5px;
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          z-index: 1000010;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+          white-space: nowrap;
+        `;
+      }
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+
+      initializeSelection();
+    }
+
+    function onBackClick(e) {
+      e.preventDefault();
+      debugLog('Back click coordinate set:', e.clientX, e.clientY);
+      finish({ x: e.clientX, y: e.clientY });
+    }
+
+    function onBackEsc(e) {
+      if (e.key === 'Escape') {
+        debugLog('Back click skipped — will use arrow keys for rewind');
+        finish(null);
+      }
+    }
+
+    backOverlay.addEventListener('click', onBackClick);
+    document.addEventListener('keydown', onBackEsc);
   }
 
   function initializeSelection() {
@@ -724,15 +919,25 @@ if (window.captureExtensionLoaded) {
       box-shadow: 0 -3px 12px rgba(0,0,0,0.4);
     `;
 
+    let navNote;
+    if (mouseClickMode) {
+      const fwd = `&#127919; Fwd (${Math.round(clickCoordinate.x)}, ${Math.round(clickCoordinate.y)})`;
+      const bwd = clickCoordinateBack
+        ? ` &nbsp;·&nbsp; &#8617; Back (${Math.round(clickCoordinateBack.x)}, ${Math.round(clickCoordinateBack.y)})`
+        : ' &nbsp;·&nbsp; &#8617; Back: arrow keys';
+      navNote = fwd + bwd;
+    } else {
+      navNote = rtlMode ? '&#8592; RTL arrow keys' : '&#8594; Arrow keys';
+    }
     let hint;
     if (twoRectangles) {
       hint = autoCaptureMode
-        ? '✓ Two areas selected &nbsp;·&nbsp; Adjust the rectangles above, then start when ready &nbsp;·&nbsp; Auto-stop on duplicates'
-        : `✓ Two areas selected &nbsp;·&nbsp; Adjust the rectangles above, then start when ready &nbsp;·&nbsp; ${pageCount} pages`;
+        ? `✓ Two areas selected &nbsp;·&nbsp; ${navNote} &nbsp;·&nbsp; Auto-stop on duplicates`
+        : `✓ Two areas selected &nbsp;·&nbsp; ${navNote} &nbsp;·&nbsp; ${pageCount} pages`;
     } else {
       hint = autoCaptureMode
-        ? '✓ Capture area selected &nbsp;·&nbsp; Adjust the rectangle above, then start when ready &nbsp;·&nbsp; Auto-stop on duplicates'
-        : `✓ Capture area selected &nbsp;·&nbsp; Adjust the rectangle above, then start when ready &nbsp;·&nbsp; ${pageCount} pages`;
+        ? `✓ Capture area selected &nbsp;·&nbsp; ${navNote} &nbsp;·&nbsp; Auto-stop on duplicates`
+        : `✓ Capture area selected &nbsp;·&nbsp; ${navNote} &nbsp;·&nbsp; ${pageCount} pages`;
     }
 
     bar.innerHTML = `
@@ -849,25 +1054,27 @@ if (window.captureExtensionLoaded) {
     function rewindStep() {
       if (remaining <= 0) {
         rewindDiv.remove();
-        startCapture();
+        setTimeout(startCapture, 300);
         return;
       }
 
       rewindDiv.textContent = `↩ Rewinding... ${remaining} page${remaining !== 1 ? 's' : ''} to go`;
 
       // Press the OPPOSITE direction to go back
-      const key = rtlMode ? 'ArrowRight' : 'ArrowLeft';
-      const keyCode = rtlMode ? 39 : 37;
-
-      const eventDown = new KeyboardEvent('keydown', {
-        key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true
-      });
-      document.dispatchEvent(eventDown);
-
-      const eventUp = new KeyboardEvent('keyup', {
-        key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true
-      });
-      document.dispatchEvent(eventUp);
+      if (mouseClickMode && clickCoordinateBack) {
+        const { x, y } = clickCoordinateBack;
+        const target = document.elementFromPoint(x, y) || document.body;
+        const opts = { clientX: x, clientY: y, bubbles: true, cancelable: true };
+        target.dispatchEvent(new MouseEvent('mousedown', opts));
+        target.dispatchEvent(new MouseEvent('mouseup', opts));
+        target.dispatchEvent(new MouseEvent('click', opts));
+        debugLog('Rewind mouse click dispatched at:', x, y);
+      } else {
+        const key = rtlMode ? 'ArrowRight' : 'ArrowLeft';
+        const keyCode = rtlMode ? 39 : 37;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true }));
+        document.dispatchEvent(new KeyboardEvent('keyup',  { key, code: key, keyCode, which: keyCode, bubbles: true, cancelable: true }));
+      }
 
       remaining--;
       setTimeout(rewindStep, 300); // 300ms between each rewind key — fast but reliable
@@ -1021,8 +1228,7 @@ setTimeout(positionCancelButton, 50);
     const shouldContinue = autoCaptureMode || currentPage < pageCount;
 
     if (shouldContinue) {
-      // Simulate arrow key press
-      simulateArrowKey();
+      simulateNavigation();
 
       // Wait for page to load, then capture next
       setTimeout(() => {
@@ -1044,6 +1250,24 @@ setTimeout(positionCancelButton, 50);
         }, 2000);
       }
     }
+  }
+
+  function simulateNavigation() {
+    if (mouseClickMode && clickCoordinate) {
+      simulateMouseClick();
+    } else {
+      simulateArrowKey();
+    }
+  }
+
+  function simulateMouseClick() {
+    const { x, y } = clickCoordinate;
+    const target = document.elementFromPoint(x, y) || document.body;
+    const opts = { clientX: x, clientY: y, bubbles: true, cancelable: true };
+    target.dispatchEvent(new MouseEvent('mousedown', opts));
+    target.dispatchEvent(new MouseEvent('mouseup', opts));
+    target.dispatchEvent(new MouseEvent('click', opts));
+    debugLog('Mouse click dispatched at:', x, y, 'on element:', target.tagName);
   }
 
   function simulateArrowKey() {

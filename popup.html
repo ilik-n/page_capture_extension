@@ -91,10 +91,29 @@
   </div>
 
   <div class="input-group">
+    <label style="margin-bottom: 6px;">Navigation method:</label>
+    <label class="checkbox-label">
+      <input type="radio" name="navMode" id="navArrows" value="arrows" checked>
+      <span>Arrow keys</span>
+    </label>
+    <label class="checkbox-label">
+      <input type="radio" name="navMode" id="navClick" value="click">
+      <span>Mouse click</span>
+    </label>
+  </div>
+
+  <div class="input-group" id="rtlGroup">
     <label class="checkbox-label">
       <input type="checkbox" id="rtlMode">
       <span>Right-to-Left (RTL) navigation</span>
     </label>
+  </div>
+
+  <div class="input-group" id="mouseClickGroup" style="display: none;">
+    <small style="color: #666; font-size: 11px; display: block; margin-bottom: 6px;">
+      Set all options above, then click the button below. The popup will close and you will click once on the page to set the navigation target, then draw your capture rectangle.
+    </small>
+    <button id="pickOnPageBtn" style="background-color: #FF9800;">&#127919; Pick on page &amp; start</button>
   </div>
   
   <div class="input-group">
